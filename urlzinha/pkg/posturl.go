@@ -33,7 +33,22 @@ func (h *PostUrlHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existingShortUrl := checkExistingUrl(body.Url)
+	if existingShortUrl != "" {
+		fmt.Println("URL already exists:", existingShortUrl)
+		w.Write([]byte(existingShortUrl))
+		return
+	}
+
 	shortUrl := generateShortUrl(body.Url)
+
+	checkedNewShortUrl := checkExistingShortUrl(shortUrl)
+
+	for checkedNewShortUrl != "" {
+		shortUrl = generateShortUrl(body.Url)
+		checkedNewShortUrl = checkExistingShortUrl(shortUrl)
+	}
+
 	fmt.Println("Short URL:", shortUrl)
 
 	storeUrl(body.Url, shortUrl)
@@ -70,4 +85,54 @@ func storeUrl(url string, shortUrl string) {
 	}
 
 	fmt.Println("url stored successfully:", url, shortUrl)
+}
+
+func checkExistingUrl(url string) string {
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://admin:admin@localhost:27017"))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	defer client.Disconnect(ctx)
+
+	collection := client.Database("admin").Collection("urls")
+	var result bson.M
+
+	err = collection.FindOne(context.Background(), bson.M{"url": url}).Decode(&result)
+	if err != nil {
+    fmt.Println("Non existing url, let's store it!")
+		return ""
+	}
+
+	fmt.Println("Found existing URL:", result)
+	return result["short_url"].(string)
+}
+
+func checkExistingShortUrl(shortUrl string) string {
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://admin:admin@localhost:27017"))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	defer client.Disconnect(ctx)
+
+	collection := client.Database("admin").Collection("urls")
+	var result bson.M
+
+	err = collection.FindOne(context.Background(), bson.M{"short_url": shortUrl}).Decode(&result)
+	if err != nil {
+    fmt.Println("Non existing short url, let's use it!")
+		return ""
+	}
+
+	fmt.Println("Found existing URL:", result)
+	return result["short_url"].(string)
 }

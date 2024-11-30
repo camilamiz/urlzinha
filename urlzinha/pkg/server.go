@@ -11,8 +11,10 @@ import (
 
 func StartServer() {
 	r := mux.NewRouter()
-	postUrlHanlder := &PostUrlHandler{}
-	r.HandleFunc("/", postUrlHanlder.Handle).Methods("POST")
+	postUrlHandler := &PostUrlHandler{}
+	getUrlHandler := &GetUrlHandler{}
+	r.HandleFunc("/", postUrlHandler.Handle).Methods("POST")
+	r.HandleFunc("/{short_url}", getUrlHandler.Handle).Methods("GET")
 
 	srv := &http.Server{
 		Handler: r,
