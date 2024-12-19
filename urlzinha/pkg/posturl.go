@@ -23,7 +23,9 @@ type PostUrlRequest struct {
 }
 
 type GetUrlResponse struct {
-	ShortUrl string `json:"short_url"`
+	ShortUrl  string `json:"short_url"`
+	Url       string `json:"url"`
+	CreatedAt string `json:"created_at"`
 }
 
 func (h *PostUrlHandler) Handle(w http.ResponseWriter, r *http.Request) {
@@ -33,15 +35,21 @@ func (h *PostUrlHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingShortUrl := checkExistingUrl(body.Url)
-	if existingShortUrl != "" {
-		fmt.Println("URL already exists:", existingShortUrl)
-		w.Write([]byte(existingShortUrl))
+	existingUrl := checkExistingUrl(body.Url)
+	if existingUrl != nil {
+		fmt.Println("URL already exists.")
+
+		b, err := json.Marshal(&existingUrl)
+		if err != nil {
+			fmt.Println("Error marshalling response:", err)
+			return
+		}
+
+		w.Write(b)
 		return
 	}
 
 	shortUrl := generateShortUrl(body.Url)
-
 	checkedNewShortUrl := checkExistingShortUrl(shortUrl)
 
 	for checkedNewShortUrl != "" {
@@ -51,8 +59,22 @@ func (h *PostUrlHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("Short URL:", shortUrl)
 
-	storeUrl(body.Url, shortUrl)
-	w.Write([]byte(shortUrl))
+	shortUrl, createdAt := storeUrl(body.Url, shortUrl)
+	// w.Write([]byte(shortUrl))
+
+	response := GetUrlResponse{
+		ShortUrl:  shortUrl,
+		Url:       body.Url,
+		CreatedAt: createdAt,
+	}
+	b, err := json.Marshal(&response)
+	if err != nil {
+		fmt.Println("Error marshalling response:", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	w.Write(b)
 }
 
 func generateShortUrl(url string) string {
@@ -62,7 +84,7 @@ func generateShortUrl(url string) string {
 	return string(encodedHash[:size])
 }
 
-func storeUrl(url string, shortUrl string) {
+func storeUrl(url string, shortUrl string) (string, string) {
 	fmt.Println("starting db")
 
 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://admin:admin@localhost:27017"))
@@ -77,17 +99,19 @@ func storeUrl(url string, shortUrl string) {
 	defer client.Disconnect(ctx)
 	fmt.Println("db started")
 
+	createdAt := time.Time.String(time.Now())
 	collection := client.Database("admin").Collection("urls")
-	_, err = collection.InsertOne(context.Background(), bson.M{"url": url, "short_url": shortUrl})
+	_, err = collection.InsertOne(context.Background(), bson.M{"url": url, "short_url": shortUrl, "created_at": createdAt})
 	fmt.Println("url:", url)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Println("url stored successfully:", url, shortUrl)
+	return shortUrl, createdAt
 }
 
-func checkExistingUrl(url string) string {
+func checkExistingUrl(url string) *GetUrlResponse {
 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://admin:admin@localhost:27017"))
 
 	if err != nil {
@@ -104,12 +128,18 @@ func checkExistingUrl(url string) string {
 
 	err = collection.FindOne(context.Background(), bson.M{"url": url}).Decode(&result)
 	if err != nil {
-    fmt.Println("Non existing url, let's store it!")
-		return ""
+		fmt.Println("Non existing url, let's store it!")
+		return nil
 	}
 
 	fmt.Println("Found existing URL:", result)
-	return result["short_url"].(string)
+	response := &GetUrlResponse{
+		ShortUrl:  result["short_url"].(string),
+		Url:       result["url"].(string),
+		CreatedAt: result["created_at"].(string),
+	}
+
+	return response
 }
 
 func checkExistingShortUrl(shortUrl string) string {
@@ -129,7 +159,7 @@ func checkExistingShortUrl(shortUrl string) string {
 
 	err = collection.FindOne(context.Background(), bson.M{"short_url": shortUrl}).Decode(&result)
 	if err != nil {
-    fmt.Println("Non existing short url, let's use it!")
+		fmt.Println("Non existing short url, let's use it!")
 		return ""
 	}
 

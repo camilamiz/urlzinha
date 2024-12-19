@@ -1,8 +1,16 @@
 package urlzinha
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type GetUrlHandler struct {
@@ -16,38 +24,61 @@ type GetUrlRequest struct {
 	ShortUrl string `json:"short_url"`
 }
 
-func (h *GetUrlHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	requestUrl := r.URL.Query().Get("short_url")
-
-
-	// var requestUrl = r.Vars(r)["short_url"]
-
-	fmt.Println("Request URL:", requestUrl)
-	// storeUrl(body.Url, shortUrl)
-	// w.Write([]byte(shortUrl))
+type GetShortUrlResponse struct {
+	ShortUrl  string `json:"short_url"`
+	Url       string `json:"url"`
+	CreatedAt string `json:"created_at"`
 }
 
-// func checkExistingShortUrl(shortUrl string) string {
-// 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://admin:admin@localhost:27017"))
+func (h *GetUrlHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	shortUrl := r.URL.Path[1:]
 
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
+	fmt.Println("Short URL:", shortUrl)
+	existingUrl := getShortUrl(shortUrl)
+	if existingUrl != nil {
+		fmt.Println("URL already exists.")
 
-// 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-// 	defer cancel()
+		b, err := json.Marshal(&existingUrl)
+		if err != nil {
+			fmt.Println("Error marshalling response:", err)
+			return
+		}
 
-// 	defer client.Disconnect(ctx)
+		w.WriteHeader(http.StatusOK)
+		w.Write(b)
+		return
+	}
 
-// 	collection := client.Database("admin").Collection("urls")
-// 	var result bson.M
+	w.WriteHeader(http.StatusNotFound)
+}
 
-// 	err = collection.FindOne(context.Background(), bson.M{"short_url": shortUrl}).Decode(&result)
-// 	if err != nil {
-//     fmt.Println("Non existing short url, let's use it!")
-// 		return ""
-// 	}
+func getShortUrl(shortUrl string) *GetShortUrlResponse {
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://admin:admin@localhost:27017"))
 
-// 	fmt.Println("Found existing URL:", result)
-// 	return result["short_url"].(string)
-// }
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	defer client.Disconnect(ctx)
+
+	collection := client.Database("admin").Collection("urls")
+	var result bson.M
+
+	err = collection.FindOne(context.Background(), bson.M{"short_url": shortUrl}).Decode(&result)
+	if err != nil {
+		fmt.Println("Non existing url, let's store it!")
+		return nil
+	}
+
+	fmt.Println("Found existing URL:", result)
+	response := &GetShortUrlResponse{
+		ShortUrl:  result["short_url"].(string),
+		Url:       result["url"].(string),
+		CreatedAt: result["created_at"].(string),
+	}
+
+	return response
+}
